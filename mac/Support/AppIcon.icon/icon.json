@@ -1,0 +1,65 @@
+{
+  "fill" : {
+    "solid" : "extended-srgb:0.18824,0.42745,0.90588,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "04-small-partitions.svg",
+          "name" : "Mint and violet volumes"
+        },
+        {
+          "image-name" : "03-large-partition.svg",
+          "name" : "Primary blue volume"
+        }
+      ],
+      "name" : "Storage map",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.22
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.08
+      }
+    },
+    {
+      "layers" : [
+        {
+          "image-name" : "02-folder-front.svg",
+          "name" : "Pale folder face"
+        }
+      ],
+      "name" : "Folder front",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.3
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.12
+      }
+    },
+    {
+      "layers" : [
+        {
+          "image-name" : "01-folder-back.svg",
+          "name" : "Blue folder and tab"
+        }
+      ],
+      "name" : "Folder back",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.25
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.15
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}

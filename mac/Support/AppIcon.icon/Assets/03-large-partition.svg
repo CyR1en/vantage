@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Vantage Folio — large-partition</title>
+  <desc>Large volume on the folder. Flat opaque artwork on a transparent 1024 × 1024 canvas.</desc>
+<path fill="#3777ED" d="M 300 439 H 466 Q 502 439 502 475 V 669 Q 502 705 466 705 H 300 Q 264 705 264 669 V 475 Q 264 439 300 439 Z"/>
+</svg>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Vantage Folio — folder-front</title>
+  <desc>Front folder panel. Flat opaque artwork on a transparent 1024 × 1024 canvas.</desc>
+<path fill="#E3EEFF" d="M 234 366 H 772 Q 836 366 836 430 V 714 Q 836 778 772 778 H 234 Q 170 778 170 714 V 430 Q 170 366 234 366 Z"/>
+</svg>

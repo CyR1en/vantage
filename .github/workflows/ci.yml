@@ -1,0 +1,97 @@
+name: build-and-test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 7 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  test:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, macos-15, macos-15-intel, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release build and tests
+        env:
+          SCANBENCH_TEST_OUTPUT: test-artifacts/release
+        run: |
+          mkdir -p test-artifacts
+          make CC=clang -j4 test 2>&1 | tee test-artifacts/release.log
+      - name: Address and undefined-behavior sanitizers
+        if: ${{ !cancelled() }}
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          SCANBENCH_TEST_OUTPUT: test-artifacts/sanitize
+        run: |
+          mkdir -p test-artifacts
+          make CC=clang MODE=sanitize BUILD=build-sanitize -j4 test 2>&1 | tee test-artifacts/sanitize.log
+      - name: Capability metadata probe
+        if: runner.os == 'macOS'
+        run: |
+          build/scanbench probe . > capability-probe.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-${{ matrix.os }}
+          path: |
+            capability-probe.json
+            test-artifacts/
+          if-no-files-found: ignore
+  mac-app:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift model and helper integration tests
+        run: |
+          mkdir -p test-artifacts
+          make -j4 test-mac 2>&1 | tee test-artifacts/swift.log
+      - name: Build and verify the app bundle
+        env:
+          SIGN_IDENTITY: '-'
+        run: |
+          make -j4 app 2>&1 | tee test-artifacts/app.log
+          codesign --verify --deep --strict build/Vantage.app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-app-validation
+          path: test-artifacts/
+          if-no-files-found: ignore
+  native-volume:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, macos-26]
+        mode: [release, sanitize]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      ASAN_OPTIONS: detect_leaks=0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native scanner
+        run: make CC=clang MODE=${{ matrix.mode }} BUILD=build-native -j4 all
+      - name: Validate all native contracts on private read-only APFS
+        run: >-
+          python3 tools/macos_validation.py native-artifacts --executable build-native/scanbench
+          --validate-only --files 2000 --directories 200
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-${{ matrix.os }}-${{ matrix.mode }}
+          path: native-artifacts/
+          if-no-files-found: error

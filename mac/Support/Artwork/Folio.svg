@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>SpaceView — Folio</title>
+  <desc>An accessible folder silhouette with a compact treemap on its face. Rounded, solid shapes keep this familiar option calm and readable. Transparent composite; import the separate files in layers/05-folio for independent Liquid Glass control.</desc>
+<g id="layer-01-folder-back"><path fill="#91B6FF" d="M 230 246 H 409 Q 435 246 453 264 L 495 306 H 776 Q 836 306 836 366 V 694 Q 836 754 776 754 H 230 Q 170 754 170 694 V 306 Q 170 246 230 246 Z"/></g>
+<g id="layer-02-folder-front"><path fill="#E3EEFF" d="M 234 366 H 772 Q 836 366 836 430 V 714 Q 836 778 772 778 H 234 Q 170 778 170 714 V 430 Q 170 366 234 366 Z"/></g>
+<g id="layer-03-large-partition"><path fill="#3777ED" d="M 300 439 H 466 Q 502 439 502 475 V 669 Q 502 705 466 705 H 300 Q 264 705 264 669 V 475 Q 264 439 300 439 Z"/></g>
+<g id="layer-04-small-partitions"><path fill="#48C9B8" d="M 556 439 H 710 Q 740 439 740 469 V 530 Q 740 560 710 560 H 556 Q 526 560 526 530 V 469 Q 526 439 556 439 Z"/><path fill="#8C81E4" d="M 556 584 H 710 Q 740 584 740 614 V 675 Q 740 705 710 705 H 556 Q 526 705 526 675 V 614 Q 526 584 556 584 Z"/></g>
+</svg>

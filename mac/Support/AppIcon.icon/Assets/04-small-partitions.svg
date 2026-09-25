@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Vantage Folio — small-partitions</title>
+  <desc>Two smaller volumes. Flat opaque artwork on a transparent 1024 × 1024 canvas.</desc>
+<path fill="#48C9B8" d="M 556 439 H 710 Q 740 439 740 469 V 530 Q 740 560 710 560 H 556 Q 526 560 526 530 V 469 Q 526 439 556 439 Z"/><path fill="#8C81E4" d="M 556 584 H 710 Q 740 584 740 614 V 675 Q 740 705 710 705 H 556 Q 526 705 526 675 V 614 Q 526 584 556 584 Z"/>
+</svg>

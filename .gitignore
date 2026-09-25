@@ -1,0 +1,42 @@
+# Local agent guidance
+AGENTS.md
+
+# C and Swift build products
+/build*/
+.build/
+.swiftpm/
+DerivedData/
+*.o
+*.d
+*.dSYM/
+*.swiftmodule
+*.swiftdoc
+*.swiftsourceinfo
+*.abi.json
+
+# Local scans, benchmark results, and scratch data
+/output/
+/tmp/
+/test-artifacts/
+/native-artifacts/
+/capability-probe.json
+*.jsonl
+*.sbi
+*.svx
+*.sparseimage
+*.sparsebundle/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# macOS and Xcode metadata
+.DS_Store
+.AppleDouble/
+.LSOverride
+._*
+__MACOSX/
+.Spotlight-V100/
+.Trashes/
+xcuserdata/
+*.xcuserstate
