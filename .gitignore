@@ -1,6 +1,9 @@
 # Local agent guidance
 AGENTS.md
 
+# Private documentation, research, and development notes
+/.local_docs/
+
 # C and Swift build products
 /build*/
 .build/
@@ -14,12 +17,11 @@ DerivedData/
 *.swiftsourceinfo
 *.abi.json
 
-# Local scans, benchmark results, and scratch data
+# Local scans, validation results, and scratch data
 /output/
 /tmp/
 /test-artifacts/
 /native-artifacts/
-/capability-probe.json
 *.jsonl
 *.sbi
 *.svx

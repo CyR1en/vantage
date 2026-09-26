@@ -1,0 +1,47 @@
+# Phosphor icons compiled into Vantage.app (https://phosphoricons.com, MIT).
+# One Phosphor name per line; each is imported in the regular, bold, fill, and
+# duotone weights. After editing, run: mac/update-icons.sh PATH/TO/phosphor-icons/core
+app-window
+archive
+arrow-clockwise
+caret-down
+caret-left
+caret-right
+caret-up
+chart-pie-slice
+check
+check-circle
+code
+desktop
+download
+eye
+file-dashed
+file-text
+files
+film-strip
+folder
+folder-open
+folder-plus
+gear-six
+hand
+hard-drive
+hard-drives
+house
+image
+layout
+list-numbers
+magnifying-glass
+music-notes
+plus
+question
+seal-check
+selection
+shield-check
+sidebar-simple
+squares-four
+stack
+toggle-right
+trash
+warning
+x
+x-circle

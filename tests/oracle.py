@@ -1,4 +1,4 @@
-"""Independent filesystem oracle; no scanner code or packed-record decoder."""
+"""Independent filesystem oracle for Vantage's tree and hard-link accounting."""
 from __future__ import annotations
 
 import ctypes
@@ -49,15 +49,17 @@ def allocated_size(path: bytes) -> int:
 
 
 def canonical(items: list[dict]) -> list[dict]:
-    return sorted(items, key=lambda x: (int(x['device']), int(x['parent']), bytes.fromhex(x['name_hex'])))
+    return sorted(items, key=lambda row: bytes.fromhex(row['path_hex']))
 
 
-def oracle(root: Path, task: str = 'tree', size_contract: str = 'logical') -> list[dict]:
+def oracle(root: Path, size_contract: str = 'logical') -> dict:
+    if size_contract not in ('logical', 'allocated'):
+        raise ValueError(f'unknown size contract: {size_contract}')
     device = os.lstat(root).st_dev
     result = []
+    unique = {}
 
-    def descend(path: bytes) -> int:
-        parent = os.lstat(path).st_ino
+    def descend(path: bytes, relative: bytes = b'') -> int:
         total = 0
         with os.scandir(path) as entries:
             children = sorted(entries, key=lambda entry: entry.name)
@@ -67,20 +69,18 @@ def oracle(root: Path, task: str = 'tree', size_contract: str = 'logical') -> li
                 continue
             code = kind(info.st_mode)
             size = 0
-            if code == 1 and task != 'enumerate':
+            if code == 1:
                 size = allocated_size(item.path) if size_contract == 'allocated' else info.st_size
-            row = {'device': str(info.st_dev), 'id': str(info.st_ino), 'parent': str(parent),
-                   'name_hex': item.name.hex(), 'kind': code, 'valid': 31, 'size': size,
-                   'subtree_bytes': 0, 'subtree_unknown': 0}
+                unique[(info.st_dev, info.st_ino)] = size
+            child = relative + (b'/' if relative else b'') + item.name
+            row = {'path_hex': child.hex(), 'kind': code, 'bytes': size, 'unknown_sizes': 0}
             result.append(row)
             if code == 2:
-                subtree = descend(item.path)
-                if task == 'tree':
-                    row['subtree_bytes'] = subtree
-                total += subtree
-            else:
-                total += size
+                row['bytes'] = descend(item.path, child)
+            total += row['bytes']
         return total
 
-    descend(os.fsencode(root))
-    return canonical(result)
+    total = descend(os.fsencode(root))
+    return {'entries': canonical(result), 'total_bytes': total,
+            'unique_bytes': sum(unique.values()), 'files': sum(row['kind'] == 1 for row in result),
+            'directories': sum(row['kind'] == 2 for row in result), 'unknown_sizes': 0}

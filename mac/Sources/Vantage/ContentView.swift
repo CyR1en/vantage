@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var model = AppModel()
+    @Environment(\.openWindow) private var openWindow
 
     init() {}
 
@@ -10,9 +11,10 @@ struct ContentView: View {
         _model = State(initialValue: model)
     }
 
+    @State private var windowWidth: CGFloat = 1180
+
     var body: some View {
-        @Bindable var model = model
-        Group {
+        AppShell {
             switch model.phase {
             case .welcome:
                 WelcomeView()
@@ -28,7 +30,26 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(minWidth: 760, minHeight: 480)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                NavigationButtons()
+            }
+            ToolbarItem(placement: .navigation) {
+                RailToggle()
+            }
+            ToolbarSpacer(.flexible)
+            ToolbarItem(placement: .primaryAction) {
+                LocationBar(width: Chrome.locationBarWidth(window: windowWidth))
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) {
+                SearchButton()
+            }
+        }
+        .toolbar(removing: .title)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .frame(minWidth: 820, minHeight: 520)
         .environment(model)
         .focusedSceneValue(\.appModel, model)
         .dropDestination(for: URL.self) { urls, _ in
@@ -36,19 +57,22 @@ struct ContentView: View {
             model.scan(url)
             return true
         }
-        .onAppear(perform: takePendingFolder)
+        .onAppear {
+            takePendingFolder()
+            AccessGuide.shared.showAtLaunchIfNeeded(openWindow)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .scanFolderRequested)) { _ in takePendingFolder() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             model.cancelScan()
         }
         .overlay(alignment: .bottom) {
             if let toast = model.toast {
-                Label(toast, systemImage: "checkmark.circle.fill")
+                Label(toast, icon: .done, weight: .fill, size: 16)
                     .font(.callout.weight(.medium))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .glassEffect(.regular, in: .capsule)
-                    .padding(.bottom, 44)
+                    .padding(.bottom, 28)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -98,12 +122,13 @@ struct ContentView: View {
 
 struct WelcomeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     @State private var recents: [ScanCache.Record] = []
 
     private struct Place: Identifiable {
         let id = UUID()
         let title: String
-        let symbol: String
+        let icon: Icon
         let url: URL
     }
 
@@ -111,28 +136,39 @@ struct WelcomeView: View {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
         func dir(_ d: FileManager.SearchPathDirectory) -> URL? { fm.urls(for: d, in: .userDomainMask).first }
-        var list = [Place(title: "Home", symbol: "house.fill", url: home)]
-        if let u = dir(.desktopDirectory) { list.append(Place(title: "Desktop", symbol: "menubar.dock.rectangle", url: u)) }
-        if let u = dir(.documentDirectory) { list.append(Place(title: "Documents", symbol: "doc.fill", url: u)) }
-        if let u = dir(.downloadsDirectory) { list.append(Place(title: "Downloads", symbol: "arrow.down.circle.fill", url: u)) }
-        list.append(Place(title: "Applications", symbol: "square.grid.3x3.fill", url: URL(fileURLWithPath: "/Applications")))
+        var list = [Place(title: "Home", icon: .home, url: home)]
+        if let u = dir(.desktopDirectory) { list.append(Place(title: "Desktop", icon: .desktop, url: u)) }
+        if let u = dir(.documentDirectory) { list.append(Place(title: "Documents", icon: .documents, url: u)) }
+        if let u = dir(.downloadsDirectory) { list.append(Place(title: "Downloads", icon: .downloads, url: u)) }
+        list.append(Place(title: "Applications", icon: .applications, url: URL(fileURLWithPath: "/Applications")))
         let disk = URL(fileURLWithPath: "/")
         let diskName = (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? "Macintosh HD"
-        list.append(Place(title: diskName, symbol: "internaldrive.fill", url: disk))
+        list.append(Place(title: diskName, icon: .disk, url: disk))
         return list
     }
 
     var body: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .background(WelcomeBackground.wash)
+        .task { recents = ScanCache.recent(limit: 4) }
+        .navigationTitle("Vantage")
+    }
+
+    private var content: some View {
         VStack(spacing: 28) {
             VStack(spacing: 14) {
                 ZStack {
                     Circle()
                         .fill(.tint.opacity(0.12))
                         .frame(width: 112, height: 112)
-                    Image(systemName: "chart.pie.fill")
-                        .font(.system(size: 52, weight: .medium))
+                    IconImage(.summary, weight: .duotone, size: 60)
                         .foregroundStyle(Color.accentColor.gradient)
-                        .symbolRenderingMode(.hierarchical)
                 }
                 .glassEffect(.regular, in: .circle)
                 Text("See What’s Taking Up Space")
@@ -147,7 +183,7 @@ struct WelcomeView: View {
             Button {
                 model.chooseFolder()
             } label: {
-                Label("Choose Folder…", systemImage: "folder.badge.plus")
+                Label("Choose Folder…", icon: .chooseFolder, weight: .bold, size: 18)
                     .padding(.horizontal, 8)
             }
             .buttonStyle(.glassProminent)
@@ -185,10 +221,8 @@ struct WelcomeView: View {
                                 model.scan(place.url)
                             } label: {
                                 VStack(spacing: 6) {
-                                    Image(systemName: place.symbol)
-                                        .font(.title2)
+                                    IconImage(place.icon, weight: .duotone, size: 26)
                                         .foregroundStyle(.tint)
-                                        .frame(height: 26)
                                     Text(place.title)
                                         .font(.callout.weight(.medium))
                                         .lineLimit(1)
@@ -202,15 +236,31 @@ struct WelcomeView: View {
                 }
             }
 
+            if AccessGuide.shared.status == .denied {
+                Button { AccessGuide.shared.show(openWindow) } label: {
+                    HStack(spacing: 8) {
+                        IconImage(.protected, weight: .fill, size: 17)
+                            .foregroundStyle(.orange)
+                        Text("Full Disk Access is off, so protected folders will be skipped.")
+                            .foregroundStyle(.secondary)
+                        Text("Turn On…")
+                            .fontWeight(.medium)
+                            .foregroundStyle(.tint)
+                    }
+                    .font(.callout)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .capsule)
+            }
+
             Text("You can also drop a folder onto this window.")
                 .font(.footnote)
                 .foregroundStyle(.tertiary)
         }
         .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(WelcomeBackground())
-        .task { recents = ScanCache.recent(limit: 4) }
-        .navigationTitle("Vantage")
     }
 }
 
@@ -235,8 +285,7 @@ private struct RecentScanRow: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                IconImage(.forward, weight: .bold, size: 11)
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12)
@@ -252,12 +301,16 @@ private struct RecentScanRow: View {
     }
 }
 
-private struct WelcomeBackground: View {
+struct WelcomeBackground: View {
+    static var wash: LinearGradient {
+        LinearGradient(colors: [.accentColor.opacity(0.10), .clear, FileCategory.image.color.opacity(0.06)],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
     var body: some View {
         ZStack {
             Color(nsColor: .windowBackgroundColor)
-            LinearGradient(colors: [.accentColor.opacity(0.10), .clear, FileCategory.image.color.opacity(0.06)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Self.wash
         }
         .ignoresSafeArea()
     }
@@ -291,7 +344,6 @@ struct ScanningView: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Vantage")
-        .navigationSubtitle(url.path)
     }
 
     private var detail: String {
@@ -306,12 +358,13 @@ struct ScanningView: View {
 
 struct FailedView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     let url: URL
     let message: String
 
     var body: some View {
         ContentUnavailableView {
-            Label("Couldn’t Scan “\(url.lastPathComponent)”", systemImage: "exclamationmark.triangle")
+            Label("Couldn’t Scan “\(url.lastPathComponent)”", icon: .warning, weight: .duotone, size: 48)
         } description: {
             Text(message)
         } actions: {
@@ -321,8 +374,9 @@ struct FailedView: View {
                 Button("Try Again") { model.scan(url) }
                     .buttonStyle(.glassProminent)
             }
-            if message.localizedCaseInsensitiveContains("permission") || message.localizedCaseInsensitiveContains("not permitted") {
-                Button("Allow Full Disk Access…") { AppModel.openFullDiskAccessSettings() }
+            if AccessGuide.shared.status != .granted,
+               message.localizedCaseInsensitiveContains("permission") || message.localizedCaseInsensitiveContains("not permitted") {
+                Button("Turn On Full Disk Access…") { AccessGuide.shared.show(openWindow) }
                     .buttonStyle(.link)
             }
         }

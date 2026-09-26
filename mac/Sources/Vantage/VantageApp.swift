@@ -13,6 +13,14 @@ struct VantageApp: App {
         .windowToolbarStyle(.unified)
         .commands { VantageCommands() }
 
+        Window("Full Disk Access", id: AccessGuide.windowID) {
+            AccessGuideView()
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .restorationBehavior(.disabled)
+        .defaultLaunchBehavior(.suppressed)
+
         Settings {
             SettingsView()
         }
@@ -37,6 +45,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        AccessGuide.shared.refresh()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AccessGuide.shared.isTerminating = true
+    }
 }
 
 extension Notification.Name {
@@ -53,6 +69,9 @@ struct VantageCommands: Commands {
 
     var body: some Commands {
         let _ = { AppDelegate.openWindow = openWindow }()
+        CommandGroup(after: .appSettings) {
+            Button("Full Disk Access…") { AccessGuide.shared.show(openWindow) }
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Window") { openWindow(id: "browser") }
                 .keyboardShortcut("n")
@@ -68,6 +87,18 @@ struct VantageCommands: Commands {
             Button("Close Scan") { model?.closeScan() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(model?.tree == nil)
+        }
+
+        CommandGroup(replacing: .sidebar) {
+            Button(model?.railExpanded == true ? "Hide Sidebar" : "Show Sidebar") { model?.toggleRail() }
+                .keyboardShortcut("s", modifiers: [.control, .command])
+                .disabled(model == nil)
+        }
+
+        CommandGroup(after: .textEditing) {
+            Button("Find") { model?.beginSearch() }
+                .keyboardShortcut("f")
+                .disabled(model?.isBrowsing != true)
         }
 
         CommandGroup(after: .pasteboard) {
@@ -128,6 +159,8 @@ struct VantageCommands: Commands {
 struct SettingsView: View {
     @AppStorage(Preferences.apparentSize) private var apparentSize = false
     @AppStorage(Preferences.confirmTrash) private var confirmTrash = true
+    @Environment(\.openWindow) private var openWindow
+    private let guide = AccessGuide.shared
 
     var body: some View {
         Form {
@@ -146,10 +179,23 @@ struct SettingsView: View {
                 Toggle("Ask before moving items to the Trash", isOn: $confirmTrash)
             }
             Section {
-                LabeledContent("Full Disk Access") {
-                    Button("Open Privacy Settings…") { AppModel.openFullDiskAccessSettings() }
+                LabeledContent {
+                    if guide.status == .granted {
+                        Button("Open Privacy Settings…") { FullDiskAccess.openSettings() }
+                    } else {
+                        Button("Turn On…") { guide.show(openWindow) }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Full Disk Access")
+                        switch guide.status {
+                        case .granted: Text("On").foregroundStyle(.green)
+                        case .denied: Text("Off").foregroundStyle(.orange)
+                        case .unknown: Text("Unknown").foregroundStyle(.secondary)
+                        }
+                    }
                 }
-                Text("To measure protected folders such as Mail or Safari data, add Vantage under Privacy & Security › Full Disk Access.")
+                Text("To measure protected folders such as Mail or Safari data, Vantage needs Full Disk Access under Privacy & Security.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

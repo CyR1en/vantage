@@ -24,8 +24,8 @@ vantage ~/Documents
 The installer uses published GitHub releases, checks SHA-256, and installs to
 `~/.local/bin` without sudo. Add that directory to your `PATH` if needed.
 The download becomes available when the first CLI release is published.
-See [installation and releases](docs/INSTALLING.md) for version pinning,
-custom locations, and macOS signing.
+See [installation](docs/VANTAGE.md#installation) for version pinning and
+custom locations.
 
 To build from source, use a C17 compiler and Make:
 
@@ -49,11 +49,13 @@ make test
 make test-mac    # Mac app tests; requires Xcode
 ```
 
-The repository also includes `scanbench`, a CLI for comparing filesystem-scanning
-methods. Build it with `make` and run `./build/scanbench --help` to get started.
+The CLI and Mac app share the C scanner in `src/`. It uses native bulk metadata
+on macOS and POSIX traversal elsewhere, with a POSIX fallback when bulk metadata
+is unsupported. `make` builds the `vantage` CLI; `make app` bundles it with the Mac app.
 
-- [Contributing](CONTRIBUTING.md) and [validation](docs/VALIDATION.md)
-- [Benchmarking](docs/BENCHMARKING.md) and [scanner architecture](docs/IMPLEMENTATION.md)
-- [File formats](docs/FORMAT.md) and [API references](docs/SOURCES.md)
+- [Contributing](CONTRIBUTING.md)
+- [Mac app design](docs/DESIGN.md)
+- [File formats](docs/FORMAT.md)
 
-[MIT license](LICENSE).
+[MIT license](LICENSE). The Mac app's interface icons are from
+[Phosphor](https://phosphoricons.com) ([MIT](mac/Support/Phosphor-LICENSE.txt)).

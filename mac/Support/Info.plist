@@ -25,7 +25,7 @@
 	<key>CFBundleExecutable</key>
 	<string>Vantage</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.scanbench.Vantage</string>
+	<string>dev.cyr1en.Vantage</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>

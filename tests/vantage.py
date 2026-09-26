@@ -13,8 +13,10 @@ import json
 import math
 import os
 from pathlib import Path
+import resource
 import select
 import signal
+import socket
 import stat
 import struct
 import subprocess
@@ -23,7 +25,8 @@ import tempfile
 import termios
 import time
 
-from oracle import allocated_size
+from native_volume import TOTAL_FIELDS, decode_export
+from oracle import allocated_size, oracle
 
 EXE = Path(sys.argv[1]).resolve()
 RUNS = 0
@@ -35,12 +38,19 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def run(*args: object, cwd: Path | None = None, success: bool = True) -> subprocess.CompletedProcess[bytes]:
+def run(*args: object, cwd: Path | None = None, success: bool = True,
+        nofile: int | None = None) -> subprocess.CompletedProcess[bytes]:
     global RUNS
     RUNS += 1
     command = [str(EXE), *(str(arg) for arg in args)]
+    def limit_descriptors() -> None:
+        if nofile is not None:
+            _, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+            resource.setrlimit(resource.RLIMIT_NOFILE, (min(nofile, hard), hard))
+
     result = subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, timeout=20)
+                            stderr=subprocess.PIPE, timeout=40,
+                            preexec_fn=limit_descriptors if nofile is not None else None)
     detail = f'{command!r}: exit {result.returncode}\nstdout={result.stdout!r}\nstderr={result.stderr!r}'
     require((result.returncode == 0) == success, detail)
     require(b'ERROR: AddressSanitizer' not in result.stderr and b'runtime error:' not in result.stderr, detail)
@@ -49,8 +59,8 @@ def run(*args: object, cwd: Path | None = None, success: bool = True) -> subproc
     return result
 
 
-def document(root: Path, *args: object, success: bool = True) -> dict:
-    result = run(root, '--json', *args, success=success)
+def document(root: Path, *args: object, success: bool = True, nofile: int | None = None) -> dict:
+    result = run(root, '--json', *args, success=success, nofile=nofile)
     try:
         value = json.loads(result.stdout)
     except (ValueError, UnicodeError) as error:
@@ -164,6 +174,18 @@ def fixture(work: Path) -> Path:
     os.symlink('.', root / 'loop')
     os.symlink('missing', root / 'dangling')
     os.mkfifo(root / 'pipe')
+    with socket.socket(socket.AF_UNIX) as endpoint:
+        endpoint.bind(str(root / 'socket'))
+    (root / 'zero').touch()
+    (root / '.hidden').write_bytes(b'hidden')
+    (root / 'Thing.app' / 'Contents').mkdir(parents=True)
+    (root / 'Thing.app' / 'Contents' / 'binary').write_bytes(b'app payload')
+    if sys.platform == 'darwin':
+        forked = root / 'resource-fork'
+        forked.write_bytes(b'data fork')
+        with open(str(forked) + '/..namedfork/rsrc', 'wb') as stream:
+            stream.write(b'R' * 16384)
+        subprocess.run(['xattr', '-w', 'dev.vantage.fixture', 'metadata' * 128, str(forked)], check=True)
     with (root / 'sparse').open('wb') as stream:
         stream.write(b'x')
         stream.truncate(8 * 1024 * 1024 + 1)
@@ -183,6 +205,9 @@ def fixture_checks(work: Path) -> None:
     require(total - unique == 7001, 'hardlink fixture failed to create expected duplicate accounting')
     automatic = document(root, '--top=10000', '--depth=8')
     check_document(automatic, root, want, total, unique)
+    if sys.platform == 'darwin':
+        require(automatic['workers'] == min((os.cpu_count() or 8) * 2, 16), 'macOS default worker budget changed')
+        require(automatic['buffer_bytes'] == 65536, 'macOS default bulk buffer changed')
     require(check_items(automatic['items'], want, total) == set(want), 'automatic scanner disagrees with POSIX')
     files = document(root, '--files', '--top=3')
     require(files['view'] == 'files' and len(files['items']) == 3, '--files/top did not restrict global ranking')
@@ -212,7 +237,9 @@ def fixture_checks(work: Path) -> None:
     current = json.loads(run('--json', cwd=root).stdout)
     check_document(current, root, want, total, unique)
     for options in (('--workers=1', '--fd-limit=4'), ('--workers', 64, '--timeout=10', '--memory-limit=16MiB')):
-        check_document(document(root, *options), root, want, total, unique)
+        value = document(root, *options)
+        check_document(value, root, want, total, unique)
+        require(value['workers'] == (1 if options[0] == '--workers=1' else 64), 'explicit worker count was overridden')
     for limit in ('1073741824', '1048576KiB', '1GiB'):
         check_document(document(root, '--memory-limit', limit), root, want, total, unique)
     if sys.platform == 'darwin':
@@ -250,6 +277,52 @@ def fixture_checks(work: Path) -> None:
     run(root / 'root-file', success=False)
     require(b'vantage' in run('--help').stdout.lower(), 'help does not identify command')
     require(b'0.' in run('--version').stdout, 'version does not contain version string')
+
+
+def traversal_checks(work: Path) -> None:
+    """Retained product scans handle broad/deep trees under descriptor limits."""
+    root = work / 'traversal'; root.mkdir()
+    for index in range(640):
+        directory = root / f'd{index:03d}'; directory.mkdir()
+        if index % 3:
+            (directory / 'payload').write_bytes(bytes([index & 255]) * (index + 1))
+    deep = root
+    for _ in range(80):
+        deep /= 'deep'; deep.mkdir()
+    (deep / 'last').write_bytes(b'end')
+    os.link(root / 'd001/payload', deep / 'hardlink')
+    os.symlink('.', root / 'cycle')
+    want, total, unique = expected(root)
+    inventory = oracle(root)
+    methods = ('posix', 'bulk') if sys.platform == 'darwin' else ('posix',)
+    for method in methods:
+        for workers, fd_limit, nofile in ((1, 4, None), (4, 12, None), (4, 256, 40)):
+            value = document(root, '--method', method, '--workers', workers,
+                             '--fd-limit', fd_limit, '--top', 10000, '--depth', 8,
+                             '--timeout', 0, nofile=nofile)
+            check_document(value, root, want, total, unique)
+            require(check_items(value['items'], want, total) ==
+                    {path for path, row in want.items() if row['depth'] <= 8},
+                    'bounded descriptors omitted visible paths')
+            require(check_items(value['largest_files'], want, total, files=True) ==
+                    {path for path, row in want.items() if row['kind'] == 'file'},
+                    'bounded descriptors omitted deeply nested files')
+            exported = decode_export(run(root, '--export', '--method', method,
+                                         '--workers', workers, '--fd-limit', fd_limit,
+                                         nofile=nofile).stdout)
+            require(exported['completion'] == 0 and exported['entries'] == inventory['entries'],
+                    'export disagrees with independent complete tree inventory')
+            require(all(exported[field] == inventory[field] for field in TOTAL_FIELDS),
+                    'export totals disagree with independent filesystem accounting')
+    limited = run(root, '--memory-limit', '4KiB', success=False)
+    require(limited.returncode == 71 and b'managed memory limit exceeded' in limited.stderr,
+            'memory exhaustion did not produce the documented resource failure')
+    if sys.platform != 'darwin':
+        for options in (('--method', 'bulk'), ('--allocated',)):
+            result = run(root, '--json', *options, success=False)
+            value = json.loads(result.stdout)
+            require(result.returncode == 2 and value['completion'] == 'unsupported',
+                    'unavailable native scan contract was not explicitly unsupported')
 
 
 def permission_check(work: Path) -> None:
@@ -449,6 +522,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix='vantage-test-', dir='/tmp') as temporary:
         work = Path(temporary).resolve()
         fixture_checks(work)
+        traversal_checks(work)
         permission_check(work)
         export_checks(work)
         terminal_checks(work)

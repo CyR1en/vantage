@@ -14,6 +14,17 @@ defaults:
   run:
     shell: bash
 jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned C formatter
+        run: |
+          python3 -m venv tmp/clang-format
+          tmp/clang-format/bin/python -m pip install -r tools/requirements-format.txt
+      - name: Check C formatting
+        run: make format-check
   test:
     timeout-minutes: 20
     strategy:
@@ -24,8 +35,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Release build and tests
-        env:
-          SCANBENCH_TEST_OUTPUT: test-artifacts/release
         run: |
           mkdir -p test-artifacts
           make CC=clang -j4 test 2>&1 | tee test-artifacts/release.log
@@ -33,20 +42,14 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           ASAN_OPTIONS: detect_leaks=0
-          SCANBENCH_TEST_OUTPUT: test-artifacts/sanitize
         run: |
           mkdir -p test-artifacts
           make CC=clang MODE=sanitize BUILD=build-sanitize -j4 test 2>&1 | tee test-artifacts/sanitize.log
-      - name: Capability metadata probe
-        if: runner.os == 'macOS'
-        run: |
-          build/scanbench probe . > capability-probe.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: validation-${{ matrix.os }}
           path: |
-            capability-probe.json
             test-artifacts/
           if-no-files-found: ignore
   mac-app:
@@ -87,8 +90,8 @@ jobs:
         run: make CC=clang MODE=${{ matrix.mode }} BUILD=build-native -j4 all
       - name: Validate all native contracts on private read-only APFS
         run: >-
-          python3 tools/macos_validation.py native-artifacts --executable build-native/scanbench
-          --validate-only --files 2000 --directories 200
+          python3 tools/macos_validation.py native-artifacts --executable build-native/vantage
+          --files 2000 --directories 200
       - uses: actions/upload-artifact@v4
         if: always()
         with:

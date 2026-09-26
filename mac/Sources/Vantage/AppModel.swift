@@ -23,7 +23,7 @@ final class AppModel {
     var tree: ScanTree? { browser?.tree }
     var scanProgress = Scanner.Progress(entries: 0, elapsed: 0)
 
-    var sidebar: SidebarItem? = .folders {
+    var sidebar: SidebarItem = .folders {
         didSet { if sidebar != oldValue { selection = []; searchText = "" } }
     }
     var directory: Int {
@@ -35,6 +35,18 @@ final class AppModel {
         set { browser?.selection = newValue }
     }
     var searchText = ""
+    /// The location bar shows a search field instead of the path.
+    var isSearching = false
+    var inspectorShown = false
+    /// The rail shows labels; remembered for new windows.
+    var railExpanded = UserDefaults.standard.bool(forKey: Preferences.railExpanded) {
+        didSet { UserDefaults.standard.set(railExpanded, forKey: Preferences.railExpanded) }
+    }
+    /// The expanded rail's width, dragged from its edge; saved when a drag ends.
+    var railExpandedWidth: CGFloat = {
+        let saved = UserDefaults.standard.double(forKey: Preferences.railWidth)
+        return saved > 0 ? min(max(saved, Chrome.railMinWidth), Chrome.railMaxWidth) : Chrome.railExpandedWidth
+    }()
     var quickLookURL: URL?
     var revision: Int {
         get { browser?.revision ?? 0 }
@@ -240,6 +252,8 @@ final class AppModel {
         record = nil
         isUpdating = false
         selection = []
+        searchText = ""
+        isSearching = false
         phase = .welcome
     }
 
@@ -455,18 +469,16 @@ final class AppModel {
             withAnimation(.smooth) { self?.toast = nil }
         }
     }
-
-    static func openFullDiskAccessSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-            NSWorkspace.shared.open(url)
-        }
-    }
 }
 
 enum Preferences {
     static let apparentSize = "measureApparentSize"
     static let confirmTrash = "confirmTrash"
     static let showTreemap = "showTreemap"
+    static let treemapFraction = "treemapFraction"
+    static let railExpanded = "railExpanded"
+    static let railWidth = "railWidth"
+    static let accessGuide = "fullDiskAccessGuide"
 }
 
 extension UserDefaults {

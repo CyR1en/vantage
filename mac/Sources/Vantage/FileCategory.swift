@@ -21,17 +21,17 @@ enum FileCategory: UInt8, CaseIterable, Identifiable, Hashable, Sendable {
         }
     }
 
-    var symbol: String {
+    var icon: Icon {
         switch self {
-        case .folder: "folder.fill"
-        case .video: "film.fill"
-        case .image: "photo.fill"
-        case .audio: "music.note"
-        case .archive: "archivebox.fill"
-        case .application: "app.badge.fill"
-        case .document: "doc.text.fill"
-        case .developer: "hammer.fill"
-        case .other: "questionmark.square.dashed"
+        case .folder: Icon(name: "folder", fallback: "folder.fill")
+        case .video: Icon(name: "film-strip", fallback: "film.fill")
+        case .image: Icon(name: "image", fallback: "photo.fill")
+        case .audio: Icon(name: "music-notes", fallback: "music.note")
+        case .archive: Icon(name: "archive", fallback: "archivebox.fill")
+        case .application: Icon(name: "app-window", fallback: "app.badge.fill")
+        case .document: Icon(name: "file-text", fallback: "doc.text.fill")
+        case .developer: Icon(name: "code", fallback: "hammer.fill")
+        case .other: Icon(name: "file-dashed", fallback: "questionmark.square.dashed")
         }
     }
 
@@ -50,15 +50,37 @@ enum FileCategory: UInt8, CaseIterable, Identifiable, Hashable, Sendable {
     }
 
     init(nameBytes: ArraySlice<UInt8>) {
-        guard let dot = nameBytes.lastIndex(of: UInt8(ascii: ".")), dot > nameBytes.startIndex,
-              nameBytes.endIndex - dot <= 12 else { self = .other; return }
+        let suffixStart = max(nameBytes.startIndex, nameBytes.endIndex - 12)
+        guard let dot = nameBytes[suffixStart...].lastIndex(of: UInt8(ascii: ".")),
+              dot > nameBytes.startIndex else { self = .other; return }
+        let extensionBytes = nameBytes[(dot + 1)...]
+        if extensionBytes.count <= 9 {
+            // A leading bit preserves the length; nine ASCII bytes fit in UInt64.
+            var key: UInt64 = 1
+            for b in extensionBytes {
+                guard b < 128 else { self = .other; return }
+                key = (key << 7) | UInt64(b >= 65 && b <= 90 ? b + 32 : b)
+            }
+            self = Self.byPackedExtension[key] ?? .other
+            return
+        }
         var ext = ""
-        for b in nameBytes[(dot + 1)...] {
+        for b in extensionBytes {
             guard b < 128 else { self = .other; return }
             ext.unicodeScalars.append(Unicode.Scalar(b >= 65 && b <= 90 ? b + 32 : b))
         }
         self = Self.byExtension[ext] ?? .other
     }
+
+    private static let byPackedExtension: [UInt64: FileCategory] = {
+        var map: [UInt64: FileCategory] = [:]
+        for (ext, category) in byExtension where ext.utf8.count <= 9 {
+            var key: UInt64 = 1
+            for byte in ext.utf8 { key = (key << 7) | UInt64(byte) }
+            map[key] = category
+        }
+        return map
+    }()
 
     private static let byExtension: [String: FileCategory] = {
         var map: [String: FileCategory] = [:]

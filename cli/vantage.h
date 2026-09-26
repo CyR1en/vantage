@@ -1,14 +1,14 @@
 #ifndef VANTAGE_H
 #define VANTAGE_H
 
-#include "scanbench.h"
+#include "scan.h"
 
 #define VANTAGE_VERSION "0.1.0"
 
 typedef struct {
-    const SBConfig *config;
-    const SBResult *result;
-    const SBInventory *inventory;
+    const VSConfig *config;
+    const VSResult *result;
+    const VSInventory *inventory;
     size_t root;
     size_t *offsets;
     size_t *children;
@@ -17,8 +17,8 @@ typedef struct {
     uint64_t index_ns;
 } VantageView;
 
-bool vantage_view_init(VantageView *view, const SBConfig *config,
-                       const SBResult *result, const SBInventory *inventory, bool build_index);
+bool vantage_view_init(VantageView *view, const VSConfig *config, const VSResult *result,
+                       const VSInventory *inventory, bool build_index);
 void vantage_view_destroy(VantageView *view);
 uint64_t vantage_bytes(const VantageView *view, size_t entry);
 uint64_t vantage_unknown(const VantageView *view, size_t entry);

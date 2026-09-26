@@ -49,7 +49,7 @@ if [ "$os" = darwin ]; then
         codesign --force --sign - --timestamp=none "$stage/vantage"
     else
         codesign --force --sign "$identity" --timestamp --options runtime \
-            --identifier dev.scanbench.vantage.cli "$stage/vantage"
+            --identifier dev.cyr1en.vantage.cli "$stage/vantage"
     fi
     codesign --verify --strict "$stage/vantage"
 fi

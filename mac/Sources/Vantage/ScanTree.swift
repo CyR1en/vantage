@@ -278,22 +278,75 @@ final class ScanTree {
         for d in 0...n where isDirectory[d] { sortChildren(of: d) }
 
         var files = [Int32]()
-        var totals: [FileCategory: UInt64] = [:]
+        var totals = [UInt64](repeating: 0, count: FileCategory.allCases.count)
+        var presentCategories = [Bool](repeating: false, count: FileCategory.allCases.count)
         var folders = 0
         for j in 0..<n {
             if kind[j] == TreeBuilder.file {
                 files.append(Int32(j))
-                totals[category[j], default: 0] += size[j]
+                let categoryIndex = Int(category[j].rawValue)
+                totals[categoryIndex] += size[j]
+                presentCategories[categoryIndex] = true
             } else if isDirectory[j] {
                 folders += 1
             }
         }
-        let sizes = size
-        files.sort { sizes[Int($0)] > sizes[Int($1)] }
+        sortFilesBySize(&files)
         filesBySize = files
-        categoryTotals = totals
+        categoryTotals = Dictionary(uniqueKeysWithValues: FileCategory.allCases.compactMap { category in
+            let index = Int(category.rawValue)
+            return presentCategories[index] ? (category, totals[index]) : nil
+        })
         fileCount = files.count
         folderCount = folders
+    }
+
+    private func sortFilesBySize(_ files: inout [Int32]) {
+        let sizes = size
+        guard files.count >= 16_384 else {
+            files.sort { sizes[Int($0)] > sizes[Int($1)] }
+            return
+        }
+        sizes.withUnsafeBufferPointer { sizes in
+            let first = sizes[Int(files[0])]
+            var variableBits: UInt64 = 0
+            for file in files { variableBits |= sizes[Int(file)] ^ first }
+            guard variableBits != 0 else { return }
+            var scratch = [Int32](repeating: 0, count: files.count)
+            var shift = variableBits.trailingZeroBitCount
+            // Stable low-to-high digit passes preserve equal-size file order.
+            while shift < 64 {
+                let width = min(11, 64 - shift)
+                let buckets = 1 << width
+                let mask = UInt64(buckets - 1)
+                if (variableBits >> shift) & mask != 0 {
+                    var offsets = [Int](repeating: 0, count: buckets)
+                    files.withUnsafeBufferPointer { source in
+                        scratch.withUnsafeMutableBufferPointer { destination in
+                            offsets.withUnsafeMutableBufferPointer { positions in
+                                for file in source {
+                                    let bucket = Int(mask - ((sizes[Int(file)] >> shift) & mask))
+                                    positions[bucket] += 1
+                                }
+                                var start = 0
+                                for bucket in 0..<buckets {
+                                    let count = positions[bucket]
+                                    positions[bucket] = start
+                                    start += count
+                                }
+                                for file in source {
+                                    let bucket = Int(mask - ((sizes[Int(file)] >> shift) & mask))
+                                    destination[positions[bucket]] = file
+                                    positions[bucket] += 1
+                                }
+                            }
+                        }
+                    }
+                    swap(&files, &scratch)
+                }
+                shift += width
+            }
+        }
     }
 
     /// Appends everything below this tree's root under `parent` in another builder.

@@ -116,6 +116,7 @@ struct TreemapView: View {
     @State private var layoutKey: LayoutKey?
     @State private var hovered: Int?
     @State private var hoverPoint: CGPoint = .zero
+    @State private var morph: Morph?
 
     private struct LayoutKey: Equatable {
         var directory: Int
@@ -123,12 +124,22 @@ struct TreemapView: View {
         var size: CGSize
     }
 
+    /// Where tiles were drawn when a resize replaced the layout; they ease from there to their new rects.
+    private struct Morph {
+        var from: [Int: CGRect]
+        var start: Date
+    }
+
+    private static let morphDuration = 0.22
+
     var body: some View {
         GeometryReader { proxy in
             let key = LayoutKey(directory: browser.directory, revision: browser.revision, size: proxy.size)
             ZStack(alignment: .topLeading) {
-                Canvas(opaque: false, rendersAsynchronously: false) { context, size in
-                    draw(in: &context)
+                TimelineView(.animation(paused: morph == nil)) { timeline in
+                    Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+                        draw(in: &context, size: size, at: timeline.date)
+                    }
                 }
                 .onContinuousHover(coordinateSpace: .local) { phase in
                     switch phase {
@@ -165,7 +176,7 @@ struct TreemapView: View {
 
                 if tiles.isEmpty {
                     ContentUnavailableView {
-                        Label("Nothing to Show", systemImage: "square.dashed")
+                        Label("Nothing to Show", icon: .empty, weight: .duotone, size: 48)
                     } description: {
                         Text("This folder doesn’t contain any files with a size.")
                     }
@@ -174,6 +185,11 @@ struct TreemapView: View {
             }
             .onAppear { relayout(key) }
             .onChange(of: key) { _, new in relayout(new) }
+            .task(id: morph?.start) {
+                guard morph != nil else { return }
+                try? await Task.sleep(for: .seconds(Self.morphDuration))
+                if !Task.isCancelled { morph = nil }
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Treemap of \(tree.name(browser.directory))")
@@ -181,8 +197,42 @@ struct TreemapView: View {
 
     private func relayout(_ key: LayoutKey) {
         guard layoutKey != key else { return }
+        // A resize of the same folder morphs from the tiles as last drawn, stretched to the new
+        // bounds, so only squarify's rearrangements animate. Other changes replace the tiles outright.
+        if let old = layoutKey, old.directory == key.directory, old.revision == key.revision,
+           old.size.width > 0, old.size.height > 0, !tiles.isEmpty {
+            let now = Date()
+            let sx = key.size.width / old.size.width, sy = key.size.height / old.size.height
+            var from: [Int: CGRect] = [:]
+            from.reserveCapacity(tiles.count)
+            for tile in tiles {
+                let r = displayedRect(tile, progress: progress(at: now)).rect
+                from[tile.item] = CGRect(x: r.minX * sx, y: r.minY * sy, width: r.width * sx, height: r.height * sy)
+            }
+            morph = Morph(from: from, start: now)
+        } else {
+            morph = nil
+        }
         layoutKey = key
         tiles = TreemapLayout.tiles(tree: tree, directory: key.directory, in: CGRect(origin: .zero, size: key.size).insetBy(dx: 1, dy: 1))
+    }
+
+    /// Eased morph progress, or nil when tiles sit at their laid-out rects.
+    private func progress(at date: Date) -> Double? {
+        guard let morph else { return nil }
+        let t = date.timeIntervalSince(morph.start) / Self.morphDuration
+        guard t < 1 else { return nil }
+        return 1 - pow(1 - max(t, 0), 3)
+    }
+
+    private func displayedRect(_ tile: TreemapTile, progress: Double?) -> (rect: CGRect, opacity: Double) {
+        guard let progress, let morph else { return (tile.rect, 1) }
+        // Tiles new to this layout (small items, newly nested contents) fade in where they belong.
+        guard let from = morph.from[tile.item] else { return (tile.rect, progress) }
+        let to = tile.rect
+        func mix(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * progress }
+        return (CGRect(x: mix(from.minX, to.minX), y: mix(from.minY, to.minY),
+                       width: mix(from.width, to.width), height: mix(from.height, to.height)), 1)
     }
 
     private func tile(at point: CGPoint) -> TreemapTile? {
@@ -201,34 +251,51 @@ struct TreemapView: View {
         tree.category[tile.item].color
     }
 
-    private func draw(in context: inout GraphicsContext) {
+    private func draw(in context: inout GraphicsContext, size: CGSize, at date: Date) {
         let dark = colorScheme == .dark
         let selected = browser.selection
+        let progress = progress(at: date)
+        // The canvas can be drawn at a new size a frame before relayout runs; stretch rather than misfit.
+        let laidOut = layoutKey?.size ?? size
+        let sx = laidOut.width > 0 ? size.width / laidOut.width : 1
+        let sy = laidOut.height > 0 ? size.height / laidOut.height : 1
+        let stretch = sx != 1 || sy != 1
         for tile in tiles {
-            let radius: CGFloat = tile.depth == 0 ? 7 : 5
-            let path = Path(roundedRect: tile.rect, cornerRadius: min(radius, tile.rect.width / 3, tile.rect.height / 3), style: .continuous)
+            var (rect, opacity) = displayedRect(tile, progress: progress)
+            if stretch { rect = CGRect(x: rect.minX * sx, y: rect.minY * sy, width: rect.width * sx, height: rect.height * sy) }
+            context.opacity = opacity
+            // Outer tiles follow the card's corners (card radius less its padding); nested ones step in.
+            let radius: CGFloat = max(Chrome.cardRadius - 8 - 2 * CGFloat(tile.depth), 3)
+            let path = Path(roundedRect: rect, cornerRadius: min(radius, rect.width / 3, rect.height / 3), style: .continuous)
             let base = color(for: tile)
             if tile.isContainer {
-                context.fill(path, with: .color(base.opacity(dark ? 0.16 + 0.05 * Double(tile.depth) : 0.12 + 0.05 * Double(tile.depth))))
-                context.stroke(path, with: .color(base.opacity(0.35)), lineWidth: 0.5)
+                context.fill(path, with: .color(base.opacity(dark ? 0.13 + 0.05 * Double(tile.depth) : 0.10 + 0.05 * Double(tile.depth))))
             } else {
-                let gradient = Gradient(colors: [base.opacity(dark ? 0.95 : 0.9), base.opacity(dark ? 0.7 : 0.72)])
-                context.fill(path, with: .linearGradient(gradient, startPoint: tile.rect.origin, endPoint: CGPoint(x: tile.rect.maxX, y: tile.rect.maxY)))
+                let gradient = Gradient(colors: [base.opacity(dark ? 0.92 : 0.88), base.opacity(dark ? 0.66 : 0.7)])
+                context.fill(path, with: .linearGradient(gradient, startPoint: rect.origin, endPoint: CGPoint(x: rect.maxX, y: rect.maxY)))
+                // A soft top-lit rim, like the glass around it.
+                if rect.width > 6, rect.height > 6 {
+                    let rim = Path(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+                                   cornerRadius: max(min(radius, rect.width / 3, rect.height / 3) - 0.5, 0), style: .continuous)
+                    context.stroke(rim, with: .linearGradient(Gradient(colors: [.white.opacity(dark ? 0.22 : 0.35), .white.opacity(0)]),
+                                                              startPoint: rect.origin,
+                                                              endPoint: CGPoint(x: rect.minX, y: rect.maxY)),
+                                   lineWidth: 1)
+                }
             }
             if hovered == tile.item {
                 context.fill(path, with: .color(.white.opacity(0.18)))
             }
             if selected.contains(tile.item) {
                 context.stroke(path, with: .color(.accentColor), lineWidth: 2.5)
-                context.stroke(Path(roundedRect: tile.rect.insetBy(dx: 2, dy: 2), cornerRadius: max(radius - 2, 1), style: .continuous),
+                context.stroke(Path(roundedRect: rect.insetBy(dx: 2, dy: 2), cornerRadius: max(radius - 2, 1), style: .continuous),
                                with: .color(.white.opacity(0.8)), lineWidth: 1)
             }
-            drawLabel(tile, in: &context, dark: dark)
+            drawLabel(tile, rect: rect, in: &context, dark: dark)
         }
     }
 
-    private func drawLabel(_ tile: TreemapTile, in context: inout GraphicsContext, dark: Bool) {
-        let r = tile.rect
+    private func drawLabel(_ tile: TreemapTile, rect r: CGRect, in context: inout GraphicsContext, dark: Bool) {
         guard r.width > 44, r.height > 16 else { return }
         let name = tree.name(tile.item)
         if tile.isContainer {

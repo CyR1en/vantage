@@ -18,12 +18,12 @@ echo "==> Building Vantage"
 (cd "$here" && swift build -c release --product Vantage)
 bin=$(cd "$here" && swift build -c release --show-bin-path)
 
-echo "==> Compiling Folio app icon"
+echo "==> Compiling Folio app icon and Phosphor icons"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/resources"
 deployment_target=$(plutil -extract LSMinimumSystemVersion raw -o - "$here/Support/Info.plist")
-xcrun actool "$here/Support/AppIcon.icon" \
+xcrun actool "$here/Support/AppIcon.icon" "$here/Support/Icons.xcassets" \
     --compile "$tmp/resources" \
     --app-icon AppIcon \
     --platform macosx \
@@ -40,6 +40,7 @@ cp "$here/Support/Info.plist" "$app/Contents/Info.plist"
 cp "$bin/Vantage" "$app/Contents/MacOS/Vantage"
 cp "$out/vantage" "$app/Contents/Helpers/vantage"
 ditto "$tmp/resources" "$app/Contents/Resources"
+cp "$here/Support/Phosphor-LICENSE.txt" "$app/Contents/Resources/Phosphor-LICENSE.txt"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 
 # Sign with a stable identity when one exists: privacy grants such as Full Disk

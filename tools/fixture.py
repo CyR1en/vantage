@@ -81,7 +81,7 @@ def main() -> None:
             forked.write_bytes(b'data fork')
             with open(str(forked) + '/..namedfork/rsrc', 'wb') as f:
                 f.write(b'R' * 16384)
-            subprocess.run(['xattr', '-w', 'com.scanbench.fixture', 'extended metadata' * 128, str(forked)], check=True)
+            subprocess.run(['xattr', '-w', 'dev.vantage.fixture', 'extended metadata' * 128, str(forked)], check=True)
             source = args.root / '.compression-source'
             source.write_bytes(b'compressed fixture\n' * 16384)
             destination = args.root / 'compressed'

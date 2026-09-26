@@ -38,16 +38,16 @@ def command(argv: list[str], output: Path, label: str, timeout: int = 600) -> in
 def environment(output: Path, executable: Path, label: str) -> None:
     metadata = {'binary_sha256': hashlib.sha256(executable.read_bytes()).hexdigest(),
                 'source_sha256': {str(p.relative_to(PROJECT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                  for p in sorted((PROJECT / 'src').glob('*')) if p.is_file()},
+                                  for p in sorted([*(PROJECT / 'src').glob('*'),
+                                                   *(PROJECT / 'cli').glob('*')]) if p.is_file()},
                 'validation_sha256': {str(p.relative_to(PROJECT)): hashlib.sha256(p.read_bytes()).hexdigest()
                                       for p in sorted([PROJECT / 'Makefile', *(PROJECT / 'tests').rglob('*.py'),
                                                        *(PROJECT / 'tests').rglob('*.c'), *(PROJECT / 'tests').rglob('*.h'),
                                                        *(PROJECT / 'tools').glob('*.py'), *(PROJECT / 'tools').glob('*.sh')])},
-                'measurements': []}
-    for argv in (['sw_vers'], ['uname', '-a'], ['xcrun', '--sdk', 'macosx', '--show-sdk-version'],
-                 ['pmset', '-g', 'batt'], ['pmset', '-g', 'custom'], ['pmset', '-g', 'therm']):
+                'platform': []}
+    for argv in (['sw_vers'], ['uname', '-a'], ['xcrun', '--sdk', 'macosx', '--show-sdk-version']):
         run = subprocess.run(argv, text=True, capture_output=True, timeout=30)
-        metadata['measurements'].append({'argv': argv, 'exit_code': run.returncode,
+        metadata['platform'].append({'argv': argv, 'exit_code': run.returncode,
                                          'stdout': run.stdout, 'stderr': run.stderr})
     (output / f'{label}.json').write_text(json.dumps(metadata, indent=2) + '\n')
 
@@ -73,13 +73,13 @@ def image_device(image: Path) -> str | None:
 @contextlib.contextmanager
 def apfs_fixture(output: Path, shape: str = 'mixed', files: int = 10000,
                  directories: int = 1000, seed: int = 42):
-    work = Path(tempfile.mkdtemp(prefix='scanbench-apfs-', dir='/tmp'))
+    work = Path(tempfile.mkdtemp(prefix='vantage-apfs-', dir='/tmp'))
     mount = work / 'mount'; mount.mkdir()
     image = work / 'fixture.sparseimage'
     state = {'work': str(work), 'mount': str(mount), 'image': str(image), 'cleaned': False}
     try:
         steps = [(['hdiutil', 'create', '-size', '2g', '-fs', 'APFS', '-type', 'SPARSE',
-                   '-volname', 'ScanbenchFixture', str(image)], 'image-create'),
+                   '-volname', 'VantageFixture', str(image)], 'image-create'),
                  (['hdiutil', 'attach', str(image), '-mountpoint', str(mount), '-nobrowse', '-owners', 'on'], 'image-attach')]
         for argv, label in steps:
             if command(argv, output, label):
@@ -120,11 +120,9 @@ def main() -> int:
     signal.signal(signal.SIGTERM, interrupted)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
-    parser.add_argument('--executable', type=Path, default=PROJECT / 'build/scanbench')
-    parser.add_argument('--validate-only', action='store_true')
+    parser.add_argument('--executable', type=Path, default=PROJECT / 'build/vantage')
     parser.add_argument('--files', type=int, default=10000)
     parser.add_argument('--directories', type=int, default=1000)
-    parser.add_argument('--rounds', type=int, default=15)
     args = parser.parse_args()
     if sys.platform != 'darwin':
         parser.error('native validation requires macOS')
@@ -134,20 +132,8 @@ def main() -> int:
     try:
         environment(args.output, args.executable, 'environment-before')
         with apfs_fixture(args.output, files=args.files, directories=args.directories) as mount:
-            status = command([str(args.executable), 'probe', str(mount)], args.output, 'probe')
-            validation_status = command([sys.executable, str(PROJECT / 'tests/native_volume.py'), str(args.executable),
-                                         str(mount), str(args.output / 'native')], args.output, 'native-validation')
-            status = status or validation_status
-            if not args.validate_only:
-                result = args.output / 'results.jsonl'
-                code = command([str(args.executable), 'bench', str(mount), '--methods', 'all',
-                                '--workers', '1,2,4,8', '--buffer', '64KiB,256KiB', '--rounds', str(args.rounds),
-                                '--warmup', '1', '--consistency', 'immutable', '--out', str(result)],
-                               args.output, 'benchmark')
-                status = status or code
-                if result.exists():
-                    report_code = command([str(args.executable), 'report', str(result)], args.output, 'report')
-                    status = status or report_code
+            status = command([sys.executable, str(PROJECT / 'tests/native_volume.py'), str(args.executable),
+                              str(mount), str(args.output / 'native')], args.output, 'native-validation')
             environment(args.output, args.executable, 'environment-after')
     except KeyboardInterrupt:
         status = 130

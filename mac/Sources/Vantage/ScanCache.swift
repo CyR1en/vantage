@@ -20,7 +20,7 @@ enum ScanCache {
 
     static var directory: URL {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("dev.scanbench.Vantage/Scans", isDirectory: true)
+        return base.appendingPathComponent("dev.cyr1en.Vantage/Scans", isDirectory: true)
     }
 
     static func key(root: String, allocated: Bool) -> String {

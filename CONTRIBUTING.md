@@ -1,14 +1,14 @@
 # Contributing
 
-Changes should preserve equivalent scan results across backends and keep large
-inventories within bounded resources. The project uses system libraries and has
-no third-party runtime dependencies.
+Changes should preserve Vantage's scan results and keep large inventories within
+bounded resources. The CLI and Mac app share one scanner, using system libraries
+with no third-party runtime dependencies.
 
 ## Build and test
 
-The C programs require a C17 compiler, Make, and POSIX threads. Python 3 is
+The C helper requires a C17 compiler, Make, and POSIX threads. Python 3 is
 required for integration tests and fixture tools. macOS provides the native bulk
-and catalog APIs; Linux supports POSIX traversal and the portable test providers.
+metadata API; Linux supports POSIX traversal and the portable bulk test provider.
 
 ```sh
 make -j4 test
@@ -36,13 +36,30 @@ notarized release; Full Disk Access may need to be granted again after rebuildin
 package cache and local evidence alone. Run `swift package --package-path mac clean`
 to clear Swift build products if needed.
 
-See [validation](docs/VALIDATION.md) for native APFS checks, opt-in performance
-tests, and the platform coverage expected of a change.
+Linux checks POSIX traversal and simulated Darwin providers. Validate native
+bulk metadata and allocated sizes on macOS. For changes to native scan behavior,
+run the APFS checks with a new output directory:
+
+```sh
+python3 tools/macos_validation.py output/native-validation \
+  --executable build/vantage --files 2000 --directories 200
+```
+
+The tool creates a test image, mounts it read-only for scanning, and detaches it
+afterward. The app's optional performance tests accept a corpus through
+`VANTAGE_PERF=/path/to/test-corpus make test-mac` or a saved scan through
+`VANTAGE_EXPORT=/path/to/saved.svx make test-mac`.
 
 ## Code and tests
 
-- Keep the existing C and Swift style. Prefer removing duplication and unused
-  work to adding new layers or dependencies.
+- Follow [the C style guide](docs/C_STYLE.md) and run `make format` before
+  submitting C changes; `make format-check` verifies the result without editing
+  files. Both commands require clang-format 22.1.0. Keep the existing Swift
+  style. Prefer removing duplication and unused work to adding new layers or
+  dependencies.
+- Follow [the Mac app design guide](docs/DESIGN.md) for layout, components,
+  icons, and interaction when changing or adding UI in `mac/`. Interface icons
+  are vendored Phosphor SVGs; update them with `mac/update-icons.sh`.
 - Keep scanner semantics explicit: no symlink traversal, one-device scope,
   hard-link identity, and unknown metadata must remain distinguishable.
 - Persistent formats are versioned. Preserve compatibility or document a
@@ -53,32 +70,35 @@ tests, and the platform coverage expected of a change.
   operations when their behavior changes. Cosmetic edits, documentation, and
   straightforward cleanup do not need new tests.
 - Measure performance changes against the same workload and build settings.
-  Confirm equivalent results and distinguish CPU processing from filesystem I/O.
+  Verify equal scan results before comparing timings. Record the workload and
+  cache state, and distinguish CPU processing from filesystem I/O.
 
 ## Repository layout
 
 | Path | Purpose |
 | --- | --- |
-| `src/` | Shared C scanner, benchmark CLI, inventory formats, and reporting |
+| `src/` | Shared C scanner, accounting, and metadata decoder |
 | `cli/` | Terminal Vantage browser and binary export |
 | `mac/` | SwiftUI app, Swift tests, app resources, and build scripts |
 | `tests/` | C units/providers, Python integration tests, and captured fixtures |
-| `tools/` | Corpus generation and native validation/benchmark runners |
-| `docs/` | Usage, architecture, formats, benchmarking, and validation guides |
+| `tools/` | Fixture generation, native correctness validation, formatting, and packaging |
+| `docs/` | Design, file formats, and the Vantage usage guide |
 | `.github/` | CI and pull request guidance |
 
-Build products, saved scans, benchmark output, and scratch files belong in the
-ignored `build*/`, `output/`, and `tmp/` directories. Raw scans and logs can contain
-personal paths; share a small synthetic reproduction when reporting a bug.
+Build products, saved scans, validation output, and scratch files belong in the
+ignored `build*/`, `output/`, and `tmp/` directories. Keep research, development
+notes, and historical documentation in the ignored `.local_docs/` directory.
+Raw scans and logs can contain personal paths; share a small synthetic
+reproduction when reporting a bug.
 The source distribution includes the captured decoder fixtures and their
-checksums, but excludes historical raw logs and local source snapshots.
+checksums.
 
 ## Submitting changes
 
 Explain the concrete problem, resulting behavior, and validation in the pull
 request. Include OS, compiler/Xcode version, scan method, and a synthetic fixture
-for platform-specific issues. Preserve failed and unsupported benchmark results;
-do not replace a backend to make a comparison pass.
+for platform-specific issues. Keep partial, failed, and unsupported scans explicit;
+only automatic method selection may retry an unsupported bulk scan with POSIX.
 
 Review `git status --short --untracked-files=all` and `git diff --cached --stat`
 before publishing. Contributions are covered by the repository's [MIT license](LICENSE).

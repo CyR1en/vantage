@@ -5,181 +5,111 @@ struct BrowserView: View {
     @Environment(AppModel.self) private var model
     @Environment(BrowserState.self) private var browser
     private var tree: ScanTree { browser.tree }
-    @State private var inspectorShown = false
     @AppStorage(Preferences.showTreemap) private var showTreemap = true
 
     var body: some View {
         @Bindable var model = model
-        NavigationSplitView {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 320)
-        } detail: {
-            detail
-                .inspector(isPresented: $inspectorShown) {
-                    InspectorView()
-                        .inspectorColumnWidth(min: 240, ideal: 270, max: 340)
-                }
-        }
-        .navigationTitle(title)
-        .navigationSubtitle(subtitle)
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: searchPrompt)
-        .toolbar { toolbar }
-        .quickLookPreview($model.quickLookURL)
+        detail
+            .navigationTitle(title)
+            .quickLookPreview($model.quickLookURL)
     }
 
     @ViewBuilder
     private var detail: some View {
-        switch model.sidebar ?? .folders {
+        switch model.sidebar {
         case .folders:
             if showTreemap && model.searchText.isEmpty {
-                VSplitView {
-                    TreemapView()
-                        .padding(8)
-                        .frame(minHeight: 150, idealHeight: 320, maxHeight: .infinity)
-                    FolderTable()
-                        .frame(minHeight: 160, idealHeight: 300, maxHeight: .infinity)
-                }
-                .safeAreaInset(edge: .bottom, spacing: 0) { PathBar() }
+                TreemapSplit()
             } else {
-                FolderTable()
-                    .safeAreaInset(edge: .bottom, spacing: 0) { PathBar() }
+                FolderList()
             }
         case .largestFiles:
-            FilesTable(category: nil)
+            FileList(category: nil)
         case .category(let category):
-            FilesTable(category: category)
+            FileList(category: category)
         }
     }
 
     private var title: String {
-        switch model.sidebar ?? .folders {
+        switch model.sidebar {
         case .folders: tree.name(browser.directory)
         case .largestFiles: "Largest Files"
         case .category(let category): category.title
         }
     }
-
-    private var subtitle: String {
-        if model.isUpdating { return "Updating…" }
-        return detailSubtitle
-    }
-
-    private var detailSubtitle: String {
-        _ = browser.revision
-        switch model.sidebar ?? .folders {
-        case .folders:
-            let d = browser.directory
-            return "\(Format.bytes(tree.size[d])) · \(Format.items(Int(tree.items[d])))"
-        case .largestFiles:
-            return "\(Format.count(tree.fileCount)) files in \(tree.rootURL.lastPathComponent)"
-        case .category(let category):
-            return Format.bytes(tree.categoryTotals[category] ?? 0)
-        }
-    }
-
-    private var searchPrompt: String {
-        model.sidebar == .folders || model.sidebar == nil ? "Search in \(tree.name(browser.directory))" : "Search files"
-    }
-
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
-            ControlGroup {
-                Button("Back", systemImage: "chevron.left") { model.goBack() }
-                    .disabled(!model.canGoBack)
-                Button("Forward", systemImage: "chevron.right") { model.goForward() }
-                    .disabled(!model.canGoForward)
-            }
-            .controlGroupStyle(.navigation)
-            .help("See folders you viewed previously")
-        }
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            let selected = browser.selectedItems
-            Button("Quick Look", systemImage: "eye") { model.quickLook() }
-                .disabled(selected.isEmpty)
-                .help("Preview the selected item (Space)")
-            Button("Show in Finder", systemImage: "finder") { model.reveal(selected) }
-                .disabled(selected.isEmpty)
-                .help("Show the selected items in Finder")
-            Button("Move to Trash", systemImage: "trash") { model.requestDeletion(selected) }
-                .disabled(selected.isEmpty)
-                .help("Move the selected items to the Trash (⌘⌫)")
-        }
-
-        ToolbarSpacer(.fixed, placement: .primaryAction)
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            if model.sidebar == .folders || model.sidebar == nil {
-                Toggle(isOn: $showTreemap) {
-                    Label("Treemap", systemImage: "square.grid.3x3.square")
-                }
-                .help(showTreemap ? "Hide the treemap" : "Show the treemap")
-            }
-            if model.isUpdating {
-                ProgressView()
-                    .controlSize(.small)
-                    .help("Checking for changes since the last scan…")
-            } else {
-                Button("Rescan", systemImage: "arrow.clockwise") { model.rescan() }
-                    .help("Update with changes since the last scan (⌘R). Full Rescan: ⌥⌘R")
-            }
-            Button("Info", systemImage: "info.circle") { inspectorShown.toggle() }
-                .help("Show details about the selection (⌥⌘I)")
-                .keyboardShortcut("i", modifiers: [.command, .option])
-        }
-    }
 }
 
-// MARK: - Sidebar
-
-struct SidebarView: View {
-    @Environment(AppModel.self) private var model
-    @Environment(BrowserState.self) private var browser
-    private var tree: ScanTree { browser.tree }
+/// The treemap above the folder list, split by a draggable handle.
+/// (VSplitView's AppKit panes misplace their content inside the inset card.)
+struct TreemapSplit: View {
+    @AppStorage(Preferences.treemapFraction) private var fraction = 0.5
+    @State private var dragStart: CGFloat?
+    @State private var dragFraction: Double?   // live value; persisted when the drag ends
+    private static let minTreemap: CGFloat = 150
+    private static let minList: CGFloat = 160
 
     var body: some View {
-        @Bindable var model = model
-        let _ = browser.revision
-        List(selection: $model.sidebar) {
-            Section(tree.rootURL.lastPathComponent) {
-                Label("Folders", systemImage: "folder")
-                    .badge(Text(Format.bytes(tree.totalSize)))
-                    .tag(SidebarItem.folders)
-                Label("Largest Files", systemImage: "list.number")
-                    .badge(Text(Format.count(tree.fileCount)))
-                    .tag(SidebarItem.largestFiles)
+        GeometryReader { proxy in
+            let total = proxy.size.height
+            let top = clamp(total * (dragFraction ?? fraction), total)
+            VStack(spacing: 0) {
+                TreemapView()
+                    .padding(8)
+                    .frame(height: top)
+                SplitHandle()
+                    .gesture(
+                        // Global space: the handle moves with the drag, so local translations would feed back.
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                let start = dragStart ?? top
+                                dragStart = start
+                                dragFraction = clamp(start + value.translation.height, total) / max(total, 1)
+                            }
+                            .onEnded { _ in
+                                if let dragFraction { fraction = dragFraction }
+                                dragFraction = nil
+                                dragStart = nil
+                            }
+                    )
+                FolderList()
+                    .frame(maxHeight: .infinity)
             }
-            Section("Kinds") {
-                ForEach(kinds, id: \.self) { category in
-                    Label {
-                        Text(category.title)
-                    } icon: {
-                        Image(systemName: category.symbol)
-                            .foregroundStyle(category.color)
-                    }
-                    .badge(Text(Format.bytes(tree.categoryTotals[category] ?? 0)))
-                    .tag(SidebarItem.category(category))
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            SummaryCard()
-                .padding(10)
         }
     }
 
-    private var kinds: [FileCategory] {
-        FileCategory.fileKinds
-            .filter { (tree.categoryTotals[$0] ?? 0) > 0 }
-            .sorted { (tree.categoryTotals[$0] ?? 0) > (tree.categoryTotals[$1] ?? 0) }
+    private func clamp(_ height: CGFloat, _ total: CGFloat) -> CGFloat {
+        min(max(height, Self.minTreemap), max(total - Self.minList, Self.minTreemap))
     }
 }
+
+private struct SplitHandle: View {
+    @State private var hovering = false
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 1)
+            Capsule()
+                .fill(Color.primary.opacity(hovering ? 0.35 : 0.18))
+                .frame(width: hovering ? 44 : 36, height: 4)
+        }
+        .frame(height: 10)
+        .frame(maxWidth: .infinity)
+        .contentShape(.rect)
+        .pointerStyle(.frameResize(position: .top))
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.15), value: hovering)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Summary
 
 struct SummaryCard: View {
     @Environment(AppModel.self) private var model
     @Environment(BrowserState.self) private var browser
+    @Environment(\.openWindow) private var openWindow
     private var tree: ScanTree { browser.tree }
 
     var body: some View {
@@ -199,7 +129,7 @@ struct SummaryCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if tree.freedBytes > 0 {
-                Label("\(Format.bytes(tree.freedBytes)) freed", systemImage: "checkmark.circle.fill")
+                Label("\(Format.bytes(tree.freedBytes)) freed", icon: .done, weight: .fill, size: 13)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.green)
             }
@@ -210,21 +140,22 @@ struct SummaryCard: View {
             }
             if tree.isPartial {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("Some folders couldn’t be read", systemImage: "exclamationmark.triangle.fill")
+                    Label("Some folders couldn’t be read", icon: .warning, weight: .fill, size: 13)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.orange)
                     Text("Sizes may be larger than shown.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    Button("Allow Full Disk Access…") { AppModel.openFullDiskAccessSettings() }
-                        .buttonStyle(.link)
-                        .font(.caption)
+                    if AccessGuide.shared.status != .granted {
+                        Button("Turn On Full Disk Access…") { AccessGuide.shared.show(openWindow) }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                    }
                 }
                 .help(tree.reason)
             }
         }
-        .padding(12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .padding(16)
     }
 }
 
@@ -257,12 +188,13 @@ struct CategoryStrip: View {
 
 // MARK: - Folder list
 
-struct FolderTable: View {
+struct FolderList: View {
     @Environment(AppModel.self) private var model
     @Environment(BrowserState.self) private var browser
     private var tree: ScanTree { browser.tree }
     @State private var rows: [ItemRow] = []
-    @State private var sortOrder = [KeyPathComparator(\ItemRow.size, order: .reverse)]
+    @State private var sortOrder: RowSort = [KeyPathComparator(\ItemRow.size, order: .reverse)]
+    @State private var compact = false
 
     private struct Key: Equatable { var directory: Int; var revision: Int; var query: String }
 
@@ -270,54 +202,26 @@ struct FolderTable: View {
         @Bindable var browser = browser
         let parentSize = tree.size[browser.directory]
         let searching = !model.searchText.isEmpty
-        Table(rows, selection: $browser.selection, sortOrder: $sortOrder) {
-            TableColumn("Name", value: \.name) { row in
-                HStack(spacing: 7) {
-                    ItemIcon(tree: tree, item: row.id)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(row.name)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        if searching {
-                            Text(row.location)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.head)
-                        }
-                    }
-                }
-            }
-            .width(min: 180, ideal: 320)
-
-            TableColumn("Size", value: \.size) { row in
-                Text(Format.bytes(row.size))
-                    .monospacedDigit()
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .width(min: 70, ideal: 90, max: 120)
-
-            TableColumn("Share") { row in
-                HStack(spacing: 8) {
-                    SizeBar(fraction: parentSize > 0 ? Double(row.size) / Double(parentSize) : 0,
-                            color: row.category.color)
-                    Text(Format.percent(row.size, of: parentSize))
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .frame(width: 42, alignment: .trailing)
-                }
-            }
-            .width(min: 120, ideal: 200)
-
-            TableColumn("Items", value: \.items) { row in
-                Text(row.isDirectory ? Format.count(row.items) : "—")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .width(min: 50, ideal: 70, max: 100)
+        List(rows, selection: $browser.selection) { row in
+            FolderRowView(tree: tree, row: row, parentSize: parentSize, searching: searching, compact: compact)
+                .cardListRow()
         }
+        .cardList()
+        .safeAreaBar(edge: .top) {
+            CardListHeader {
+                SortButton(title: "Name", key: \ItemRow.name, order: $sortOrder)
+                if !compact {
+                    Text("Share")
+                        .foregroundStyle(.secondary)
+                        .frame(width: ShareCell.width, alignment: .leading)
+                    SortButton(title: "Items", key: \ItemRow.items, descendingFirst: true, alignment: .trailing, order: $sortOrder)
+                        .frame(width: CardList.itemsWidth)
+                }
+                SortButton(title: "Size", key: \ItemRow.size, descendingFirst: true, alignment: .trailing, order: $sortOrder)
+                    .frame(width: CardList.sizeWidth)
+            }
+        }
+        .onGeometryChange(for: Bool.self) { $0.size.width < CardList.compactWidth } action: { compact = $0 }
         .contextMenu(forSelectionType: Int.self) { ids in
             ItemMenu(items: Array(ids).sorted())
         } primaryAction: { ids in
@@ -332,8 +236,11 @@ struct FolderTable: View {
                 if searching {
                     ContentUnavailableView.search(text: model.searchText)
                 } else {
-                    ContentUnavailableView("Empty Folder", systemImage: "folder",
-                                           description: Text("Nothing in this folder takes up space."))
+                    ContentUnavailableView {
+                        Label("Empty Folder", icon: .folders, weight: .duotone, size: 48)
+                    } description: {
+                        Text("Nothing in this folder takes up space.")
+                    }
                 }
             }
         }
@@ -356,51 +263,43 @@ struct FolderTable: View {
 
 // MARK: - Largest files
 
-struct FilesTable: View {
+struct FileList: View {
     @Environment(AppModel.self) private var model
     @Environment(BrowserState.self) private var browser
     private var tree: ScanTree { browser.tree }
     let category: FileCategory?
     @State private var rows: [ItemRow] = []
-    @State private var sortOrder = [KeyPathComparator(\ItemRow.size, order: .reverse)]
+    @State private var sortOrder: RowSort = [KeyPathComparator(\ItemRow.size, order: .reverse)]
+    @State private var compact = false
 
     private struct Key: Equatable { var category: FileCategory?; var revision: Int; var query: String }
     static let limit = 1000
 
     var body: some View {
         @Bindable var browser = browser
-        Table(rows, selection: $browser.selection, sortOrder: $sortOrder) {
-            TableColumn("Name", value: \.name) { row in
-                HStack(spacing: 7) {
-                    ItemIcon(tree: tree, item: row.id)
-                    Text(row.name)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            .width(min: 180, ideal: 300)
-
-            TableColumn("Size", value: \.size) { row in
-                Text(Format.bytes(row.size))
-                    .monospacedDigit()
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .width(min: 70, ideal: 90, max: 120)
-
-            TableColumn("Share of Scan") { row in
-                SizeBar(fraction: Double(row.size) / Double(max(largest, 1)), color: row.category.color)
-                    .help(Format.percent(row.size, of: tree.totalSize) + " of everything scanned")
-            }
-            .width(min: 80, ideal: 140)
-
-            TableColumn("Where", value: \.location) { row in
-                Text(row.location)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-            }
-            .width(min: 120, ideal: 280)
+        let largest = largest
+        List(rows, selection: $browser.selection) { row in
+            FileRowView(tree: tree, row: row, largest: largest, compact: compact)
+                .cardListRow()
         }
+        .cardList()
+        .safeAreaBar(edge: .top) {
+            CardListHeader {
+                HStack(spacing: 14) {
+                    SortButton(title: "Name", key: \ItemRow.name, fills: false, order: $sortOrder)
+                    SortButton(title: "Location", key: \ItemRow.location, fills: false, order: $sortOrder)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if !compact {
+                    Text("Share of Scan")
+                        .foregroundStyle(.secondary)
+                        .frame(width: ShareCell.width, alignment: .leading)
+                }
+                SortButton(title: "Size", key: \ItemRow.size, descendingFirst: true, alignment: .trailing, order: $sortOrder)
+                    .frame(width: CardList.sizeWidth)
+            }
+        }
+        .onGeometryChange(for: Bool.self) { $0.size.width < CardList.compactWidth } action: { compact = $0 }
         .contextMenu(forSelectionType: Int.self) { ids in
             ItemMenu(items: Array(ids).sorted())
         } primaryAction: { ids in
@@ -413,8 +312,11 @@ struct FilesTable: View {
         .overlay {
             if rows.isEmpty {
                 if model.searchText.isEmpty {
-                    ContentUnavailableView("No Files", systemImage: category?.symbol ?? "doc",
-                                           description: Text("There are no files of this kind in the scan."))
+                    ContentUnavailableView {
+                        Label("No Files", icon: category?.icon ?? .documents, weight: .duotone, size: 48)
+                    } description: {
+                        Text("There are no files of this kind in the scan.")
+                    }
                 } else {
                     ContentUnavailableView.search(text: model.searchText)
                 }
@@ -422,15 +324,13 @@ struct FilesTable: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if tree.fileCount > Self.limit || category != nil {
-                HStack {
-                    Text(footer)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(.bar)
+                Text(footer)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .glassEffect(.regular, in: .capsule)
+                    .padding(.bottom, 10)
             }
         }
         .task(id: Key(category: category, revision: browser.revision, query: model.searchText)) {
@@ -456,47 +356,6 @@ struct FilesTable: View {
     }
 }
 
-// MARK: - Path bar
-
-struct PathBar: View {
-    @Environment(AppModel.self) private var model
-    @Environment(BrowserState.self) private var browser
-    private var tree: ScanTree { browser.tree }
-
-    var body: some View {
-        let chain = tree.lineage(browser.directory)
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                ForEach(Array(chain.enumerated()), id: \.element) { index, item in
-                    if index > 0 {
-                        Image(systemName: "chevron.compact.right")
-                            .foregroundStyle(.tertiary)
-                    }
-                    Button {
-                        model.navigate(to: item)
-                    } label: {
-                        HStack(spacing: 4) {
-                            ItemIcon(tree: tree, item: item, size: 14)
-                            Text(tree.name(item))
-                        }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .fontWeight(item == browser.directory ? .medium : .regular)
-                }
-            }
-            .font(.caption)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-        }
-        .defaultScrollAnchor(.trailing)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
-    }
-}
-
 // MARK: - Inspector
 
 struct InspectorView: View {
@@ -513,8 +372,7 @@ struct InspectorView: View {
             } else if items.count > 1 {
                 let bytes = items.reduce(UInt64(0)) { $0 + tree.size[$1] }
                 VStack(spacing: 12) {
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .font(.system(size: 44))
+                    IconImage(.selection, weight: .duotone, size: 52)
                         .foregroundStyle(.secondary)
                     Text("\(items.count) Items").font(.title3.weight(.semibold))
                     Text(Format.bytes(bytes)).font(.title2).monospacedDigit()
@@ -523,7 +381,7 @@ struct InspectorView: View {
                 .padding()
                 .frame(maxWidth: .infinity)
             } else {
-                detail(model.sidebar == .folders || model.sidebar == nil ? browser.directory : tree.root)
+                detail(model.sidebar == .folders ? browser.directory : tree.root)
             }
         }
     }
@@ -571,11 +429,11 @@ struct InspectorView: View {
     private func actions(_ items: [Int]) -> some View {
         VStack(spacing: 8) {
             Button { model.reveal(items) } label: {
-                Label("Show in Finder", systemImage: "finder").frame(maxWidth: .infinity)
+                Label("Show in Finder", icon: .reveal).frame(maxWidth: .infinity)
             }
             .buttonStyle(.glass)
             Button(role: .destructive) { model.requestDeletion(items) } label: {
-                Label("Move to Trash", systemImage: "trash").frame(maxWidth: .infinity)
+                Label("Move to Trash", icon: .trash).frame(maxWidth: .infinity)
             }
             .buttonStyle(.glass)
             .tint(.red)
