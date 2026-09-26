@@ -187,6 +187,10 @@ are retained, so memory grows with the number of entries.
 
 ## Install and test
 
+For prebuilt macOS and Linux binaries, use the
+[curl installer](INSTALLING.md). It installs the terminal CLI to `~/.local/bin`;
+the graphical Mac app is built separately.
+
 The binary has no Python runtime requirement. Build with a C17 compiler and the
 system thread library; native bulk/allocation features use macOS system APIs.
 

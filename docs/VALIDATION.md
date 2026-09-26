@@ -21,6 +21,27 @@ and explicitly unsupported Darwin methods. Invalid UTF-8 filename cases are
 skipped on filesystems that reject those names; byte-oriented unit coverage
 still runs.
 
+`make test` also runs `tests/installer.py`. It uses local release archives and a
+fake HTTPS transport to check platform selection, Rosetta, version pinning,
+checksums, interrupted downloads, malformed archives, and preservation of an
+existing installation on failure. It never downloads or installs a real release
+into the user's home directory.
+
+To test packaging and installation of a native build:
+
+```sh
+sh tools/package-cli.sh v0.1.0
+python3 tests/installer.py --release-dir output/cli-release
+```
+
+Use the version from `cli/vantage.h`. On Linux, first install `musl-tools` and
+build with `make CC=musl-gcc LDFLAGS='-static -pthread' -j4 test`; the packager
+requires a static executable and includes musl's license notice. The CLI release
+workflow runs this check
+on both macOS architectures and both Linux architectures, after the existing C
+suite. Linux release builds use static musl linking. A manual workflow run
+builds test artifacts without creating a release; tag pushes create a draft.
+
 ## Mac app
 
 macOS 26 or later and full Xcode 26 or later are required.

@@ -76,6 +76,7 @@ test: $(BUILD)/scanbench $(BUILD)/vantage $(BUILD)/unit $(BUILD)/vantage-unit $(
 	$(BUILD)/bulk-mock
 	$(BUILD)/comparison-mock
 	python3 tests/tooling.py
+	python3 tests/installer.py
 	python3 tests/integration.py $(BUILD)/scanbench
 	python3 tests/vantage.py $(BUILD)/vantage
 check: test
