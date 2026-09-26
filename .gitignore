@@ -28,9 +28,61 @@ DerivedData/
 *.sparseimage
 *.sparsebundle/
 
-# Python caches
+# Python caches and environments
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs, crash dumps, and profiling captures
+*.log
+/core
+/core.*
+vgcore.*
+*.trace
+perf.data
+perf.data.old
+gmon.out
+
+# C tooling: indexers, coverage, quick compiles
+compile_commands.json
+/.cache/
+tags
+TAGS
+GTAGS
+GRTAGS
+GPATH
+a.out
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+
+# Editor and merge leftovers
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+.idea/
+.vscode/
+
+# Signing material and secrets; never commit
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
 
 # macOS and Xcode metadata
 .DS_Store
